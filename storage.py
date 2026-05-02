@@ -3,6 +3,7 @@ Thread-safe in-memory context store for all four context scopes.
 """
 
 import threading
+import time
 from typing import Any, Dict, Optional
 
 
@@ -15,8 +16,8 @@ class ContextStore:
             "customer": {},
             "trigger": {},
         }
-        # suppression_keys: merchant_id -> set of suppression keys
-        self._suppression: Dict[str, set] = {}
+        # suppression_keys: merchant_id -> suppression_key -> expiry timestamp
+        self._suppression: Dict[str, Dict[str, float]] = {}
         # conversation_history: conv_id -> list of turns
         self._conversations: Dict[str, list] = {}
 
@@ -50,13 +51,16 @@ class ContextStore:
 
     def is_suppressed(self, merchant_id: str, suppression_key: str) -> bool:
         with self._lock:
-            return suppression_key in self._suppression.get(merchant_id, set())
+            now = time.time()
+            keys = self._suppression.get(merchant_id, {})
+            expiry = keys.get(suppression_key, 0)
+            return expiry > now
 
-    def add_suppression(self, merchant_id: str, suppression_key: str):
+    def add_suppression(self, merchant_id: str, suppression_key: str, ttl_seconds: int = 7200):
         with self._lock:
             if merchant_id not in self._suppression:
-                self._suppression[merchant_id] = set()
-            self._suppression[merchant_id].add(suppression_key)
+                self._suppression[merchant_id] = {}
+            self._suppression[merchant_id][suppression_key] = time.time() + ttl_seconds
 
     def get_conversation(self, conversation_id: str) -> list:
         with self._lock:
