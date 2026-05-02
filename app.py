@@ -173,7 +173,7 @@ def tick():
             store.add_suppression(merchant_id, suppression_key)
         return result
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(compose_one, *c): c for c in candidates}
         for future in concurrent.futures.as_completed(futures, timeout=25):
             try:
