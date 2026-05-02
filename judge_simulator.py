@@ -23,16 +23,16 @@ import os
 # =============================================================================
 
 # Your bot's URL (where your bot is running)
-BOT_URL = "http://localhost:5001"
+BOT_URL = "https://web-production-87beb.up.railway.app"
 
 # Choose your LLM provider: "openai", "anthropic", "gemini", "deepseek", "groq", "ollama", "openrouter"
-LLM_PROVIDER = "openrouter"
+LLM_PROVIDER = "groq"
 
-# Your API key (set OPENROUTER_API_KEY in the environment)
-LLM_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+# Your API key (set GROQ_API_KEY in the environment)
+LLM_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 # Model to use (leave empty for default, or specify like "gpt-4o", "claude-3-5-sonnet-20241022", etc.)
-LLM_MODEL = "meta-llama/llama-3.3-70b-instruct"
+LLM_MODEL = "llama-3.3-70b-versatile"
 
 
 # For Ollama only: local server URL
