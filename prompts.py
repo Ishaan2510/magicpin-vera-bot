@@ -95,18 +95,15 @@ CATEGORY VOICE — follow this exactly:
 {category_voice}
 
 ════════════════════════════════════════
-STEP 2 — PICK AT LEAST ONE COMPULSION LEVER:
-1. Specificity: concrete number, date, source citation ("JIDA Oct p.14", "₹299", "2,100-patient trial")
-2. Loss aversion: "you're missing X" / "before this window closes" / "only 2 slots left"
-3. Social proof: "3 merchants in your locality did X this month" / "similar clinics saw Y"
-4. Effort externalization: "I've drafted it — just say go" / "I can send it to 200 customers"
-5. Curiosity gap: "want to see who?" / "want the full list?" / "2-min read"
-6. Reciprocity: "I noticed X in your account — thought you'd want to know"
-7. Ask the merchant: open a dialogue — "what's your most-asked service this week?"
-8. Single binary ask: "Reply YES to send / NO to skip" — never multi-choice except booking flows
+STEP 2 — COMPULSION LEVER SELECTION — pick ONE based on merchant state:
+- If merchant CTR < peer_median_ctr → use LOSS AVERSION: "you're leaving X leads on the table"
+- If merchant has active offers → use EFFORT EXTERNALIZATION: "I've drafted it — just say go"
+- If merchant has uncontacted leads or high footfall → use SOCIAL PROOF: "3 similar merchants did X"
+- If merchant footfall_trend == "dip" → use LOSS AVERSION + urgency: "before this window closes"
+- If no clear signal → use CURIOSITY GAP: "want to see who's looking for you right now?"
 
-Use lever #3 (social proof) or #7 (asking the merchant) whenever the context supports it —
-these are the ones current Vera almost never uses, and the judge rewards them.
+DO NOT use social proof every time. Rotate based on the merchant's actual state.
+The lever you chose must be named in the rationale field.
 ════════════════════════════════════════
 
 MERCHANT FIT (the judge scores this hardest — 4 rules, all mandatory):

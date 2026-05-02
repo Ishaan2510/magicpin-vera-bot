@@ -82,6 +82,40 @@ def context():
 # ---------------------------------------------------------------------------
 # POST /v1/tick
 # ---------------------------------------------------------------------------
+def _score_pair(merchant_payload, trigger_payload):
+    """Score a merchant+trigger pair. Higher = better signal."""
+    score = 0
+    performance = merchant_payload.get("performance", {})
+    identity = merchant_payload.get("identity", {})
+
+    # Boost if trigger category matches merchant category
+    trigger_category = trigger_payload.get("category", "")
+    merchant_category = identity.get("category", "")
+    if trigger_category and trigger_category.lower() == merchant_category.lower():
+        score += 20
+
+    # Boost for performance gap (merchant below peer)
+    ctr = performance.get("ctr", 0)
+    peer_ctr = performance.get("peer_median_ctr", 0)
+    if peer_ctr > 0 and ctr < peer_ctr:
+        score += 15
+
+    # Boost for footfall dip
+    if performance.get("footfall_trend") == "dip":
+        score += 10
+
+    # Boost if merchant has active offers (gives LLM something concrete)
+    if merchant_payload.get("offers"):
+        score += 10
+
+    # Boost for time-sensitive trigger types
+    trigger_type = trigger_payload.get("type", "")
+    if trigger_type in ("recall", "competitor", "research", "seasonal"):
+        score += 8
+
+    return score
+
+
 @app.route("/v1/tick", methods=["POST"])
 def tick():
     data = request.get_json(force=True, silent=True) or {}
@@ -95,12 +129,13 @@ def tick():
     if not merchants:
         return jsonify({"actions": []}), 200
 
-    # Build candidate pairs: (merchant_id, trigger_id, priority_score)
+    # Build candidate pairs: one best trigger per merchant
     candidates = []
     for merchant_id, merchant_ctx in merchants.items():
         payload = merchant_ctx["payload"]
         identity = payload.get("identity", {})
         category = identity.get("category", "").lower()
+        best_candidate = None
 
         for trigger_id in available_triggers:
             # Check suppression
@@ -118,16 +153,17 @@ def tick():
             if store.is_suppressed(merchant_id, suppression_key):
                 continue
 
-            # Priority: prefer triggers that match the merchant's category
-            trigger_category = trigger_payload.get("category", "").lower()
-            priority = 10 if trigger_category == category else 5
+            priority = _score_pair(
+                merchant_ctx.get("payload", {}),
+                trigger_ctx.get("payload", {}),
+            )
 
-            # Boost if merchant has a performance signal
-            performance = payload.get("performance", {})
-            if performance.get("footfall_trend") == "dip" or performance.get("ctr", 1) < performance.get("peer_median_ctr", 1):
-                priority += 3
+            candidate = (merchant_id, trigger_id, priority, suppression_key)
+            if best_candidate is None or priority > best_candidate[2]:
+                best_candidate = candidate
 
-            candidates.append((merchant_id, trigger_id, priority, suppression_key))
+        if best_candidate:
+            candidates.append(best_candidate)
 
     # Sort by priority, take top 20
     candidates.sort(key=lambda x: x[2], reverse=True)
