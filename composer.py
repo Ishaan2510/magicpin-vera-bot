@@ -3,36 +3,65 @@ from typing import Any, Dict, Optional
 from prompts import CATEGORY_VOICE, CATEGORY_VOICE_DEFAULT, COMPOSE_ACTION_SYSTEM, COMPOSE_REPLY_SYSTEM
 
 logger = logging.getLogger(__name__)
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-MODEL = "meta-llama/llama-3.3-70b-instruct"
-API_URL = "https://openrouter.ai/api/v1/chat/completions"
+PROVIDERS = [
+    {
+        "name": "Groq",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "key_env": "GROQ_API_KEY",
+        "model": "llama-3.3-70b-versatile",
+    },
+    {
+        "name": "OpenRouter",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "key_env": "OPENROUTER_API_KEY",
+        "model": "meta-llama/llama-3.3-70b-instruct",
+    },
+]
 
 def _call_llm(system_prompt: str, user_message: str) -> str:
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": MODEL,
-        "max_tokens": 512,
-        "temperature": 0.3,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-    }
-    print("=== DEBUG SYSTEM PROMPT (first 300 chars) ===")
-    print(system_prompt[:300])
-    print("=== DEBUG USER MESSAGE ===")
-    print(user_message)
-    print("=== END DEBUG ===")
-    resp = requests.post(API_URL, headers=headers, json=payload, timeout=25)
-    resp.raise_for_status()
-    raw_text = resp.json()["choices"][0]["message"]["content"]
-    print("=== DEBUG RAW RESPONSE ===")
-    print(raw_text)
-    print("=== END DEBUG ===")
-    return raw_text
+    last_error = None
+    for provider in PROVIDERS:
+        api_key = os.environ.get(provider["key_env"], "")
+        if not api_key:
+            logger.info(f"Skipping {provider['name']} — no key set")
+            continue
+        try:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": provider["model"],
+                "max_tokens": 512,
+                "temperature": 0.3,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+            }
+            resp = requests.post(
+                provider["url"],
+                headers=headers,
+                json=payload,
+                timeout=25,
+            )
+            if resp.status_code in (429, 402):
+                logger.warning(f"{provider['name']} rate limited ({resp.status_code}) — trying next")
+                last_error = f"{provider['name']}: HTTP {resp.status_code}"
+                continue
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            logger.info(f"Composed via {provider['name']}")
+            return content
+        except requests.exceptions.Timeout:
+            logger.warning(f"{provider['name']} timed out — trying next")
+            last_error = f"{provider['name']}: timeout"
+            continue
+        except Exception as e:
+            logger.warning(f"{provider['name']} failed: {e} — trying next")
+            last_error = str(e)
+            continue
+    raise RuntimeError(f"All providers failed. Last error: {last_error}")
 
 def _parse_json_response(text: str) -> Optional[Dict]:
     """Robustly parse JSON from LLM response, handling edge cases."""

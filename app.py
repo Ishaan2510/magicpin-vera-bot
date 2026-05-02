@@ -41,7 +41,7 @@ def metadata():
     return jsonify({
         "team_name": "Ishaan Goswami",
         "team_members": ["Ishaan Goswami"],
-        "model": "meta-llama/llama-3.3-70b-instruct",
+        "model": "llama-3.3-70b-versatile (groq/openrouter/together fallback)",
         "approach": "context-grounded single-signal composer with category-aware prompting and suppression",
         "contact_email": "ishaangoswami735@gmail.com",
         "version": "1.0.0",
