@@ -11,10 +11,16 @@ PROVIDERS = [
         "model": "llama-3.3-70b-versatile",
     },
     {
-        "name": "OpenRouter",
+        "name": "OpenRouter-Free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "key_env": "OPENROUTER_API_KEY",
-        "model": "meta-llama/llama-3.3-70b-instruct",
+        "model": None,
+        "models": [
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "mistralai/mistral-7b-instruct:free",
+            "google/gemma-3-27b-it:free",
+            "deepseek/deepseek-r1:free",
+        ],
     },
 ]
 
@@ -31,7 +37,6 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
                 "Content-Type": "application/json",
             }
             payload = {
-                "model": provider["model"],
                 "max_tokens": 512,
                 "temperature": 0.3,
                 "messages": [
@@ -39,6 +44,10 @@ def _call_llm(system_prompt: str, user_message: str) -> str:
                     {"role": "user", "content": user_message},
                 ],
             }
+            if provider.get("models"):
+                payload["models"] = provider["models"]
+            else:
+                payload["model"] = provider["model"]
             resp = requests.post(
                 provider["url"],
                 headers=headers,
