@@ -87,35 +87,45 @@ def _score_pair(merchant_payload, trigger_payload):
     performance = merchant_payload.get("performance", {})
     identity = merchant_payload.get("identity", {})
 
-    # Category match is a BOOST, not a requirement
     trigger_category = trigger_payload.get("category", "").lower()
     merchant_category = identity.get("category", "").lower()
-    if trigger_category and trigger_category == merchant_category:
-        score += 20
-    elif not trigger_category:
-        score += 10
 
-    # Performance gap signals — always a boost
-    ctr = float(performance.get("ctr", 0))
-    peer_ctr = float(performance.get("peer_median_ctr", 0))
-    if peer_ctr > 0 and ctr < peer_ctr:
+    # Category match is a bonus, mismatch is NOT a disqualifier
+    if trigger_category and trigger_category == merchant_category:
+        score += 25
+    elif not trigger_category:
         score += 15
 
+    # Performance gap = high urgency
+    try:
+        ctr = float(performance.get("ctr", 0))
+        peer = float(performance.get("peer_median_ctr", 0))
+        if peer > 0 and ctr < peer:
+            score += 20
+    except (ValueError, TypeError):
+        pass
+
     if performance.get("footfall_trend") == "dip":
-        score += 10
+        score += 15
 
+    # Uncontacted leads = high value
+    leads = merchant_payload.get("leads", {})
+    uncontacted = leads.get("uncontacted") or leads.get("new") or leads.get("count") or 0
+    try:
+        if int(uncontacted) > 0:
+            score += 15
+    except (ValueError, TypeError):
+        pass
+
+    # Active offer = can compose a specific message
     if merchant_payload.get("offers"):
-        score += 8
-
-    # Boost ALL trigger types equally — don't penalize specific types
-    trigger_type = trigger_payload.get("type", "")
-    if trigger_type in (
-        "recall", "research", "competitor", "regulation_change",
-        "seasonal", "lead_surge", "digest",
-    ):
         score += 10
 
-    # Minimum score floor — every valid merchant+trigger pair gets at least 5
+    # All trigger types are valid — no penalty for type
+    if trigger_payload.get("type"):
+        score += 5
+
+    # Minimum floor — no pair gets score 0
     return max(score, 5)
 
 
@@ -132,13 +142,12 @@ def tick():
     if not merchants:
         return jsonify({"actions": []}), 200
 
-    # Build candidate pairs: one best trigger per merchant
+    # Build candidate pairs: every merchant is eligible for every available trigger.
     candidates = []
     for merchant_id, merchant_ctx in merchants.items():
         payload = merchant_ctx["payload"]
         identity = payload.get("identity", {})
         category = identity.get("category", "").lower()
-        best_candidate = None
 
         for trigger_id in available_triggers:
             # Check suppression
@@ -146,8 +155,12 @@ def tick():
             trigger_payload = trigger_ctx.get("payload", {})
 
             # Safely determine trigger type for suppression key
-            # Priority: payload.kind -> trigger_id split -> default 'generic'
-            trigger_type = trigger_payload.get("kind") or trigger_id.split("_")[1] if "_" in trigger_id else "generic"
+            # Priority: payload.type -> payload.kind -> trigger_id split -> default 'generic'
+            trigger_type = (
+                trigger_payload.get("type")
+                or trigger_payload.get("kind")
+                or (trigger_id.split("_")[1] if "_" in trigger_id else "generic")
+            )
 
             # Build suppression key
             week = datetime.now().strftime("%Y-W%W")
@@ -161,16 +174,12 @@ def tick():
                 trigger_ctx.get("payload", {}),
             )
 
-            candidate = (merchant_id, trigger_id, priority, suppression_key)
-            if best_candidate is None or priority > best_candidate[2]:
-                best_candidate = candidate
+            candidates.append((merchant_id, trigger_id, priority, suppression_key))
 
-        if best_candidate:
-            candidates.append(best_candidate)
-
-    # Sort by priority, take top 20
+    # Sort by priority, keep a wider candidate pool, then compose top 20.
     candidates.sort(key=lambda x: x[2], reverse=True)
-    candidates = candidates[:20]
+    candidate_pool = candidates[:30]
+    candidates = candidate_pool[:20]
 
     if not candidates:
         return jsonify({"actions": []}), 200
