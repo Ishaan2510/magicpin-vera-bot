@@ -83,37 +83,40 @@ def context():
 # POST /v1/tick
 # ---------------------------------------------------------------------------
 def _score_pair(merchant_payload, trigger_payload):
-    """Score a merchant+trigger pair. Higher = better signal."""
     score = 0
     performance = merchant_payload.get("performance", {})
     identity = merchant_payload.get("identity", {})
 
-    # Boost if trigger category matches merchant category
-    trigger_category = trigger_payload.get("category", "")
-    merchant_category = identity.get("category", "")
-    if trigger_category and trigger_category.lower() == merchant_category.lower():
+    # Category match is a BOOST, not a requirement
+    trigger_category = trigger_payload.get("category", "").lower()
+    merchant_category = identity.get("category", "").lower()
+    if trigger_category and trigger_category == merchant_category:
         score += 20
+    elif not trigger_category:
+        score += 10
 
-    # Boost for performance gap (merchant below peer)
-    ctr = performance.get("ctr", 0)
-    peer_ctr = performance.get("peer_median_ctr", 0)
+    # Performance gap signals — always a boost
+    ctr = float(performance.get("ctr", 0))
+    peer_ctr = float(performance.get("peer_median_ctr", 0))
     if peer_ctr > 0 and ctr < peer_ctr:
         score += 15
 
-    # Boost for footfall dip
     if performance.get("footfall_trend") == "dip":
         score += 10
 
-    # Boost if merchant has active offers (gives LLM something concrete)
     if merchant_payload.get("offers"):
-        score += 10
-
-    # Boost for time-sensitive trigger types
-    trigger_type = trigger_payload.get("type", "")
-    if trigger_type in ("recall", "competitor", "research", "seasonal"):
         score += 8
 
-    return score
+    # Boost ALL trigger types equally — don't penalize specific types
+    trigger_type = trigger_payload.get("type", "")
+    if trigger_type in (
+        "recall", "research", "competitor", "regulation_change",
+        "seasonal", "lead_surge", "digest",
+    ):
+        score += 10
+
+    # Minimum score floor — every valid merchant+trigger pair gets at least 5
+    return max(score, 5)
 
 
 @app.route("/v1/tick", methods=["POST"])
@@ -237,6 +240,14 @@ def reply():
     received_at = data.get("received_at")
     turn_number = data.get("turn_number", 1)
 
+    if turn_number > 8:
+        return jsonify({
+            "action": "end",
+            "body": "",
+            "cta": "none",
+            "rationale": "Max turns reached.",
+        }), 200
+
     # Load conversation history
     history = store.get_conversation(conversation_id)
     history.append({
@@ -260,6 +271,14 @@ def reply():
         message=message,
         turn_number=turn_number,
     )
+
+    history.append({
+        "role": "vera",
+        "message": result.get("body", ""),
+        "action": result.get("action"),
+        "turn": turn_number + 1,
+    })
+    store.set_conversation(conversation_id, history)
 
     logger.info(f"reply: conv={conversation_id} turn={turn_number} action={result.get('action')}")
     return jsonify({

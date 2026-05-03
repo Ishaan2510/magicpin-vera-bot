@@ -105,18 +105,24 @@ def compose_action(
     category_voice = CATEGORY_VOICE.get(category_name, CATEGORY_VOICE_DEFAULT)
 
     context = {
-        "merchant": {
+        "REAL_MERCHANT_DATA": {
             "id": merchant_id,
-            "identity": identity,
-            "performance": merchant_payload.get("performance", {}),
-            "offers": merchant_payload.get("offers", []),
-            "conversation_history_summary": merchant_payload.get("conversation_history_summary", "none"),
+            "name": merchant_payload.get("identity", {}).get("name", ""),
+            "category": merchant_payload.get("identity", {}).get("category", ""),
+            "location": merchant_payload.get("identity", {}).get("location", ""),
+            "languages": merchant_payload.get("identity", {}).get("languages", ["en"]),
+            "ACTUAL_PERFORMANCE_NUMBERS": merchant_payload.get("performance", {}),
+            "ACTUAL_OFFERS": merchant_payload.get("offers", []),
+            "leads": merchant_payload.get("leads", {}),
+            "subscription": merchant_payload.get("subscription", {}),
         },
-        "trigger": {
+        "TRIGGER_INSIGHT": {
             "id": trigger_id,
-            **trigger_payload,
+            "type": trigger_payload.get("type", ""),
+            "insight": trigger_payload.get("insight", ""),
+            "category": trigger_payload.get("category", ""),
         },
-        "category_guidelines": category_payload,
+        "CATEGORY_CONTEXT": category_payload,
     }
     if customer_payload:
         context["customer"] = customer_payload
@@ -164,45 +170,138 @@ def compose_reply(
     message: str,
     turn_number: int,
 ) -> Dict:
-    history_lines = []
-    for turn in history:
-        role = turn.get("role", "merchant")
-        msg = turn.get("message", "")
-        t = turn.get("turn", "?")
-        history_lines.append(f"Turn {t} [{role}]: {msg}")
-    history_text = "\n".join(history_lines) if history_lines else "No prior history."
+    msg_lower = message.lower().strip()
 
-    system_prompt = COMPOSE_REPLY_SYSTEM.format(
-        merchant_json=json.dumps(merchant_payload, ensure_ascii=False, indent=2),
-        history_text=history_text,
+    ACCEPT_SIGNALS = [
+        "yes", "haan", "ha", "ok", "okay", "sure", "go ahead",
+        "send it", "proceed", "book", "confirm", "let's do",
+        "please book", "wed", "thu", "mon", "tue", "fri", "sat", "sun",
+        "5 nov", "6pm", "7pm", "8pm", "morning", "evening", "afternoon",
+        "bilkul", "kar do", "bhejo", "schedule",
+    ]
+    REJECT_SIGNALS = [
+        "no", "nahi", "nope", "not interested", "band karo",
+        "stop", "mat bhejo", "cancel", "don't", "dont",
+    ]
+    AUTO_REPLY_SIGNALS = [
+        "thank you for contacting", "we will get back",
+        "out of office", "auto", "automated", "away",
+    ]
+
+    is_accept = any(s in msg_lower for s in ACCEPT_SIGNALS)
+    is_reject = any(s in msg_lower for s in REJECT_SIGNALS)
+    is_auto = any(s in msg_lower for s in AUTO_REPLY_SIGNALS)
+
+    recent_waits = sum(
+        1 for t in history[-3:]
+        if t.get("role") == "vera" and t.get("action") == "wait"
     )
+    if recent_waits >= 2:
+        return {
+            "action": "end",
+            "body": "",
+            "cta": "none",
+            "rationale": "Loop detected — ending conversation.",
+        }
+
+    if from_role == "customer":
+        if is_accept:
+            for word in message.split():
+                if any(c.isdigit() for c in word) or word.lower() in [
+                    "morning", "evening", "afternoon", "pm", "am",
+                ]:
+                    break
+            merchant_name = merchant_payload.get("identity", {}).get("name", "the merchant")
+            body = f"Booking confirmed! {merchant_name} will see you then. You'll get a reminder 1hr before."
+            return {
+                "action": "send",
+                "body": body,
+                "cta": "none",
+                "rationale": "Customer confirmed slot — booking acknowledged.",
+            }
+        return {
+            "action": "end",
+            "body": "No problem! Reach out anytime.",
+            "cta": "none",
+            "rationale": "Customer declined.",
+        }
+
+    if is_auto:
+        return {
+            "action": "wait",
+            "body": "",
+            "cta": "none",
+            "rationale": "Auto-reply detected.",
+        }
+
+    if is_accept and not is_reject:
+        offers = merchant_payload.get("offers", [])
+        offer_text = ""
+        if offers:
+            o = offers[0]
+            offer_text = f" — starting with {o.get('name', '')} @ ₹{o.get('price', '')}"
+        body = f"Perfect{offer_text}. Sending now — you'll see results within 24hrs. Need anything else?"
+        return {
+            "action": "send",
+            "body": body[:200],
+            "cta": "yes_no",
+            "rationale": "Merchant accepted — confirming and advancing.",
+        }
+
+    if is_reject:
+        return {
+            "action": "end",
+            "body": "Understood! I'll check back when the timing is better.",
+            "cta": "none",
+            "rationale": "Merchant declined.",
+        }
+
+    history_text = "\n".join([
+        f"Turn {t.get('turn','?')} [{t.get('role','?')}]: {t.get('message','')}"
+        for t in history[-4:]
+    ])
+    merchant_name = merchant_payload.get("identity", {}).get("name", "this merchant")
+    offers = merchant_payload.get("offers", [])
+    offer_str = ", ".join([f"{o.get('name')} @ ₹{o.get('price')}" for o in offers[:2]])
+
+    system = f"""You are Vera, magicpin's merchant assistant. Reply to this merchant message.
+Merchant: {merchant_name}
+Available offers: {offer_str if offer_str else 'none'}
+Recent conversation:
+{history_text}
+
+Rules:
+- If it's a question, answer it using only the merchant info above
+- Keep reply under 150 characters
+- Output strict JSON only: {{"action": "send", "body": "...", "cta": "open_ended", "rationale": "..."}}
+- action must be send, wait, or end"""
+
+    user = f'Merchant said: "{message}". What should Vera reply?'
 
     try:
-        user_message = (
-            f"The merchant just said (turn {turn_number}): \"{message}\"\n"
-            f"What should Vera do next?"
-        )
-        raw = _call_llm(system_prompt, user_message)
+        raw = _call_llm(system, user)
         parsed = _parse_json_response(raw)
-
-        if not parsed:
-            logger.error(f"No valid JSON for reply conv={conversation_id}")
+        if not parsed or not parsed.get("body"):
             return {
-                "action": "wait",
-                "body": "",
-                "rationale": "Parse failure — waiting for retry.",
+                "action": "send",
+                "body": "Got it! Want me to help with anything specific for your business?",
+                "cta": "open_ended",
+                "rationale": "LLM fallback.",
             }
-
         action = parsed.get("action", "send")
         if action not in ("send", "wait", "end"):
             action = "send"
-
         return {
             "action": action,
-            "body": parsed.get("body", ""),
+            "body": parsed.get("body", "")[:200],
             "cta": parsed.get("cta", "open_ended"),
             "rationale": parsed.get("rationale", ""),
         }
     except Exception as e:
-        logger.error(f"OpenRouter API error in compose_reply: {e}")
-        return {"action": "wait", "body": "", "rationale": f"API error: {str(e)}"}
+        logger.error(f"compose_reply LLM error: {e}")
+        return {
+            "action": "send",
+            "body": "Got it! Let me know how I can help grow your business.",
+            "cta": "open_ended",
+            "rationale": "Exception fallback.",
+        }

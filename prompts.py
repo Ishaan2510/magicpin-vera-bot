@@ -137,6 +137,16 @@ SPECIFICITY CHECKLIST (verify before outputting):
 If any box is unchecked → rewrite the body before outputting.
 
 ════════════════════════════════════════
+SPECIFICITY HARD RULE:
+Every number in your body MUST come from REAL_MERCHANT_DATA above.
+Acceptable: their exact CTR%, their exact offer price, their lead count,
+their review count, days remaining on subscription.
+NEVER acceptable: benchmark averages, trigger statistics, invented numbers,
+category-level data presented as merchant data.
+If REAL_MERCHANT_DATA has no useful numbers → use the merchant's name +
+offer name only, with no fabricated metrics.
+
+════════════════════════════════════════
 STEP 3 — OUTPUT FORMAT (strict JSON only, no markdown, no extra text before or after):
 {{
   "body": "...",
