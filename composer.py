@@ -211,7 +211,11 @@ def compose_reply(
                     "morning", "evening", "afternoon", "pm", "am",
                 ]:
                     break
-            merchant_name = merchant_payload.get("identity", {}).get("name", "the merchant")
+            merchant_name = (
+                merchant_payload.get("identity", {}).get("name") or
+                merchant_id.replace("_", " ").title() or
+                "your merchant"
+            )
             body = f"Booking confirmed! {merchant_name} will see you then. You'll get a reminder 1hr before."
             return {
                 "action": "send",
@@ -260,7 +264,11 @@ def compose_reply(
         f"Turn {t.get('turn','?')} [{t.get('role','?')}]: {t.get('message','')}"
         for t in history[-4:]
     ])
-    merchant_name = merchant_payload.get("identity", {}).get("name", "this merchant")
+    merchant_name = (
+        merchant_payload.get("identity", {}).get("name") or
+        merchant_id.replace("_", " ").title() or
+        "your merchant"
+    )
     offers = merchant_payload.get("offers", [])
     offer_str = ", ".join([f"{o.get('name')} @ ₹{o.get('price')}" for o in offers[:2]])
 

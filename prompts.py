@@ -147,6 +147,13 @@ If REAL_MERCHANT_DATA has no useful numbers → use the merchant's name +
 offer name only, with no fabricated metrics.
 
 ════════════════════════════════════════
+URGENCY RULE: The body must create a reason to reply TODAY, not "sometime".
+Use one of: time window ("this week only"), scarcity ("2 slots left"),
+loss framing ("you're currently missing X leads"), or action readiness
+("I've drafted it — just say yes"). A message with no urgency anchor
+scores 0 on engagement regardless of other quality.
+
+════════════════════════════════════════
 STEP 3 — OUTPUT FORMAT (strict JSON only, no markdown, no extra text before or after):
 {{
   "body": "...",
